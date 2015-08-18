@@ -1,7 +1,8 @@
-#include <libudev.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
+
+#include <libudev.h>
 
 static struct udev *udev;
 
@@ -19,6 +20,11 @@ static const char *find_driver(struct udev_device *node)
 	}
 
 	return p;
+}
+
+static const char *pr_devname(struct udev_device *dev)
+{
+	return udev_device_get_devnode(dev);
 }
 
 static void pr_devinfo(struct udev_device *dev)
@@ -68,7 +74,8 @@ int main (int argc, char *argv[])
 {
 	struct udev_enumerate *enumerate, *e2;
 	struct udev_list_entry *devices, *dev_list_entry;
-	struct udev_device *dev, *pdev;
+	struct udev_device *dev, *pdev, *cdev;
+	const char *path;
 	
 	/* Create the udev object */
 	udev = udev_new();
@@ -77,19 +84,20 @@ int main (int argc, char *argv[])
 	enumerate = udev_enumerate_new(udev);
 	e2 = udev_enumerate_new(udev);
 
-	while (argc > 0)
-		udev_enumerate_add_match_subsystem(enumerate, argv[argc--]);
+	while (argc > 1)
+		udev_enumerate_add_match_subsystem(enumerate, argv[--argc]);
 
 	udev_enumerate_scan_devices(enumerate);
+	//udev_enumerate_scan_subsystems(enumerate);
 	devices = udev_enumerate_get_list_entry(enumerate);
 	udev_list_entry_foreach(dev_list_entry, devices) {
-		const char *path;
 		
 		/* Get the filename of the /sys entry for the device
 		 * and create a udev_device object (dev) representing it */
 		path = udev_list_entry_get_name(dev_list_entry);
 		dev = udev_device_new_from_syspath(udev, path);
 	
+		printf("adding: %s\n", pr_devname(dev));
 		udev_enumerate_add_match_parent(e2, dev);	
 	}
 	/* Free first enumerator object */
@@ -99,14 +107,13 @@ int main (int argc, char *argv[])
 	udev_enumerate_scan_devices(e2);
 	devices = udev_enumerate_get_list_entry(e2);
 	udev_list_entry_foreach(dev_list_entry, devices) {
-		const char *path;
 		
 		/* Get the filename of the /sys entry for the device
 		 * and create a udev_device object (dev) representing it */
 		path = udev_list_entry_get_name(dev_list_entry);
-		dev = udev_device_new_from_syspath(udev, path);
-		pr_devinfo(dev);
-		udev_device_unref(dev);
+		cdev = udev_device_new_from_syspath(udev, path);
+		pr_devinfo(cdev);
+		udev_device_unref(cdev);
 	}
 
 	udev_enumerate_unref(e2);
