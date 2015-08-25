@@ -35,3 +35,36 @@ This initial release is not intended for production.
 * Display of controllers with no namespaces is a TODO (hard to find hardware)
 * No RDMA backed devices supported (need hardware)
 * Many small bugs.
+
+**How it should work**
+
+```
++-HOST-SYSTEM----+                      +--TARGET-SYSTEM---------------+
+|                |                      |                              |
+|                |                      |                              |
+| | RDMA Ctrl |  |                      |  | RDMA Ctrl |               |
+|                |<=====(fabric)=======>|  | NVMe Ctrl |               |
++----------------+                      |  | disk1, disk2, ... |       |
+                                        |                              |
+                                        +------------------------------+
+
+The output will look like the following for the above scenario:
+
+# HOST SYSTEM
+$ lsnvme -H
+disk1 -> transport mapping
+disk2 -> transport mapping
+
+$ lsnvme -T
+disk1   info  /dev/nvme0n1
+disk2   info  /dev/nvme0n2
+
+# TARGET SYSTEM
+$ lsnvme -H
+(empty?)
+
+$ lsnvme -T
+disk1   info  /dev/nvme0n1
+disk2   info  /dev/nvme0n2
+
+```
