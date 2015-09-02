@@ -1,4 +1,5 @@
-#include <linux/nvme.h>
+// only needed for ioctl interface:
+//#include <linux/nvme.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +21,8 @@
 
 static const char NVME[] = "nvme";
 
+static struct udev *udev;
+
 enum {
 	SZ_B,
 	SZ_KB,
@@ -34,13 +37,17 @@ static struct options {
 	int verbose;
 	bool disp_ctrl;
 	bool disp_devs;
-	bool headers;
+	bool disp_tree;
+	bool disp_machine;
+	int headers;
 } opts = {
-	SZ_AUTO,
-	0,
-	false,
-	true,
-	false,
+	SZ_AUTO,	/* determine size */
+	0,		/* verbosity */
+	false,		/* display controllers */
+	true,		/* display block devs */
+	false,		/* display as tree */
+	false,		/* machine readable output */
+	0,		/* print headers */
 };
 
 static struct size_spec {
@@ -54,7 +61,7 @@ static struct size_spec {
 	[SZ_AUTO] = { 0, 0 },
 };
 
-// search parents until grandfather for dirver
+// search parents until grandfather for driver
 static const char *find_driver(struct udev_device *node)
 {
 	static unsigned int count = 3;
@@ -73,7 +80,6 @@ static const char *find_driver(struct udev_device *node)
 void lsnvme_printss_header(const char *tab)
 {
 	printf("%s[dev:ns]\tdevtype\tvendor\tmodel\trevision\tdev\tsize\n", tab);
-
 }
 
 /*
@@ -124,6 +130,9 @@ static char *bd_size(struct udev_device *dev)
 	strcat(path, "/size");
 
 	nptr = read_str(path);
+
+	if (!nptr)
+		return "-";
 
 	blocks = strtoull(nptr, &endptr, 10);
 
@@ -188,7 +197,23 @@ void lsnvme_printctrl(struct udev_device *dev)
 	);
 }
 
-static int lsnvme_enum_devs(struct udev *udev, struct udev_device *dev)
+static int lsnvme_dev(const char *path)
+{
+	struct udev_device *dev = udev_device_new_from_syspath(udev, path);
+	//const char *dt = udev_device_get_devtype(dev);
+
+	if (dev == NULL)
+		return EXIT_FAILURE;
+
+	if (strcmp(udev_device_get_subsystem(dev), NVME) == 0)
+		lsnvme_printctrl(dev);
+	else
+		lsnvme_printbd(dev, "");
+
+	return EXIT_SUCCESS;
+}
+
+static int lsnvme_enum_devs(struct udev_device *dev)
 {
 	struct udev_enumerate *enum_children = udev_enumerate_new(udev);
 	struct udev_list_entry *devices, *dev_list_entry;
@@ -219,21 +244,15 @@ static int lsnvme_enum_devs(struct udev *udev, struct udev_device *dev)
 
 	udev_enumerate_unref(enum_children);
 
-	return 0;
+	return EXIT_SUCCESS;
 }
 
-static int lsnvme_enum_ctrl(const char *custom)
+static int lsnvme_enum_ctrl(const char *match)
 {
-	struct udev *udev;
 	struct udev_enumerate *enum_parents;
 	struct udev_list_entry *devices, *dev_list_entry;
 	struct udev_device *dev;
 	const char *path;
-
-	udev = udev_new();
-
-	if (udev == NULL)
-		return EXIT_FAILURE;
 
 	enum_parents = udev_enumerate_new(udev);
 
@@ -245,31 +264,14 @@ static int lsnvme_enum_ctrl(const char *custom)
 		path = udev_list_entry_get_name(dev_list_entry);
 		dev = udev_device_new_from_syspath(udev, path);
 
-		lsnvme_enum_devs(udev, dev);
+		lsnvme_enum_devs(dev);
 
 		udev_device_unref(dev);
 	}
 
 	udev_enumerate_unref(enum_parents);
 
-	udev_unref(udev);
-
 	return EXIT_SUCCESS;
-}
-
-static int usage(const char *progr)
-{
-	printf("Usage: %s [<switches>]\n", progr);
-
-	printf("\nDisplay options:\n");
-	printf("-H\t\tDisplay the controllers in addition to the attached devices\n");
-	printf("-s [GMKB]\tShow sizes in specific format (default: auto)\n");
-	printf("-v\t\tVerbose output\n");
-
-	printf("\nGeneral options:\n");
-	printf("-h\t\tShow this help output and exit\n");
-	printf("-v\t\tPrint version and exit\n");
-	return EXIT_FAILURE;
 }
 
 static int version(const char *progr)
@@ -303,31 +305,98 @@ static void set_size(char size_spec)
 	}
 }
 
+static struct option long_options[] = {
+	{"size",	required_argument, 0, 's'},
+	{"host",	optional_argument, 0, 'H'},
+	{"tree",	no_argument, 0, 't'},
+	{"m",		no_argument, 0, 'm'},
+	{"headers",	no_argument, &opts.headers, 1},
+	{"version",	no_argument, 0, 'V'},
+	{"verbose",	no_argument, 0, 'v'},
+	{"help",	no_argument, 0, 'h'},
+	{0,0,0,0}
+};
+
+static const char *help_strings[][2] = {
+	{"SIZE",	"\tspecific size from [GMKB], default: auto"},
+	{"",		"\tdisplay host context"},
+	{"",		"\tdisplay tree-like diagram if possible"},
+	{"",		"\tmachine readable output"},
+	{"",		"\tprint descriptive headers"},
+	{"",		"\tdisplay version and exit"},
+	{"",		"\tincrease verbosity level"},
+	{"",		"\tdisplay this help and exit"},
+	{"", ""}
+};
+
+static int usage(const char *progr)
+{
+	const struct option *ptr = long_options;
+
+	printf("Usage: %s [<switches>] [ devices.. ]\n\n", progr);
+
+	for (int i = 0; ptr->name != NULL; ++i, ptr = &long_options[i])
+		if (ptr->has_arg == required_argument)
+			printf("  -%c, --%s=%s%s\n", ptr->val, ptr->name,
+				help_strings[i][0], help_strings[i][1]);
+		else if (ptr->flag && ptr->val)
+			printf("  --%s\t%s\n", ptr->name,
+				help_strings[i][1]);
+		else
+			printf("  -%c, --%s\t%s\n", ptr->val, ptr->name,
+				help_strings[i][1]);
+
+	return EXIT_SUCCESS;
+}
+
 int main(int argc, char *argv[])
 {
-	int opt;
+	int opt, option_index, ret = EXIT_SUCCESS;
 
-	while ((opt = getopt(argc, argv, "HVvs:h")) != -1) {
+	while ((opt = getopt_long(argc, argv, "s:HtmVvh", long_options, &option_index)) != -1) {
 		switch (opt) {
+		case 0: /* longopt only, may not be used */
+			printf("option: %s\n", long_options[option_index].name);
+			printf("%d\n", opts.headers);
+			break;
+		case 's':
+			set_size(optarg[0]);
+			break;
 		case 'H':
 			opts.disp_ctrl = true;
 			opts.disp_devs = false;
+			break;
+		case 't':
+			opts.disp_tree = true;
+			break;
+		case 'm':
+			opts.disp_machine = true;
 			break;
 		case 'V':
 			return version(argv[0]);
 		case 'v':
 			++opts.verbose;
 			break;
-		case 's':
-			set_size(optarg[0]);
-			break;
 		case 'h':
+		case '?':
 		default:
 			return usage(argv[0]);
 		}
 	}
 
-	lsnvme_enum_ctrl(NULL);
+	udev = udev_new();
 
-	return EXIT_SUCCESS;
+	if (udev == NULL) {
+		fprintf(stderr, "failed to initialize udev library, exiting\n");
+		return EXIT_FAILURE;
+	}
+
+	if (optind < argc)
+		while (optind < argc)
+			ret += lsnvme_dev(argv[optind++]);
+	else
+		ret = lsnvme_enum_ctrl(NULL);
+
+	udev_unref(udev);
+	return ret;
 }
