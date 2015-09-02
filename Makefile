@@ -1,7 +1,9 @@
+CFLAGS ?= -Wall -std=c99
+
 ifdef DEBUG
-	CFLAGS += -Wall -g -DDEBUG=1
+	CFLAGS += -g -DDEBUG=1
 else
-	CFLAGS += -Wall -Werror -O2
+	CFLAGS += -Werror -O2
 endif
 
 LDFLAGS += -ludev
