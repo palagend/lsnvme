@@ -97,26 +97,23 @@ int main (int argc, char *argv[])
 		path = udev_list_entry_get_name(dev_list_entry);
 		dev = udev_device_new_from_syspath(udev, path);
 	
-		printf("adding: %s\n", pr_devname(dev));
+		// enumerate over all descendents of first enumeration
 		udev_enumerate_add_match_parent(e2, dev);	
-	}
-	/* Free first enumerator object */
-	udev_enumerate_unref(enumerate);
-
-	// enumerate over all descendents of first enumeration
-	udev_enumerate_scan_devices(e2);
-	devices = udev_enumerate_get_list_entry(e2);
-	udev_list_entry_foreach(dev_list_entry, devices) {
+		udev_enumerate_scan_devices(e2);
+		devices = udev_enumerate_get_list_entry(e2);
+		udev_list_entry_foreach(dev_list_entry, devices) {
 		
-		/* Get the filename of the /sys entry for the device
-		 * and create a udev_device object (dev) representing it */
-		path = udev_list_entry_get_name(dev_list_entry);
-		cdev = udev_device_new_from_syspath(udev, path);
-		pr_devinfo(cdev);
-		udev_device_unref(cdev);
+			/* Get the filename of the /sys entry for the device
+			 * and create a udev_device object (dev) representing it */
+			path = udev_list_entry_get_name(dev_list_entry);
+			cdev = udev_device_new_from_syspath(udev, path);
+			pr_devinfo(cdev);
+			udev_device_unref(cdev);
+		}
 	}
 
 	udev_enumerate_unref(e2);
+	udev_enumerate_unref(enumerate);
 
 	udev_unref(udev);
 

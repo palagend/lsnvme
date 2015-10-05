@@ -31,10 +31,14 @@ $ lsnvme -H
 
 This initial release is not intended for production.
 
-* Front end arg parsing isn't hooked up, almost no arguments are supported.
-* Display of controllers with no namespaces is a TODO (hard to find hardware)
-* No RDMA backed devices supported (need hardware)
-* Many small bugs.
+* Display of controllers with no namespaces is a TODO (need hardware)
+* No RDMA backed devices supported (aftr milestone 3?)
+* strip slashes from given paths
+* take paths from /dev or /sys, fugure out which and do the right thing.
+* sort entries with natural sort
+* Test with non-default /sys and /dev classes
+* sort entries properly
+* this should work:  lsblk --output NAME,VENDOR,REV,MODEL,SERIAL,TYPE,WWN,SUBSYSTEMS
 
 **How it should work**
 

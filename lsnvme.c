@@ -14,12 +14,17 @@
 #include <limits.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <mntent.h>
 
 #include <libudev.h>
 
-#define TAB "\t"
+#define TAB "  "
+#define TEE "├─"
+#define ELB "└─"
 
 static const char NVME[] = "nvme";
+static const char *SYS = "/sys";
+static const char *DEV = "/dev";
 
 static struct udev *udev;
 
@@ -61,27 +66,6 @@ static struct size_spec {
 	[SZ_AUTO] = { 0, 0 },
 };
 
-// search parents until grandfather for driver
-static const char *find_driver(struct udev_device *node)
-{
-	static unsigned int count = 3;
-	const char *p = udev_device_get_driver(node);
-	struct udev_device *parent = node;
-
-	while (p == NULL && count > 0) {
-		parent = udev_device_get_parent(parent);
-		p = udev_device_get_driver(parent);
-		--count;
-	}
-
-	return p;
-}
-
-void lsnvme_printss_header(const char *tab)
-{
-	printf("%s[dev:ns]\tdevtype\tvendor\tmodel\trevision\tdev\tsize\n", tab);
-}
-
 /*
  * TODO: make this char buffer the correct size
  */
@@ -102,7 +86,51 @@ static char *read_str(const char *path)
 	return read_str;
 }
 
-int find_sz(unsigned long long total)
+// search parents until grandfather for driver
+static const char *find_driver(struct udev_device *node)
+{
+	unsigned int count = 3;
+	const char *p = udev_device_get_driver(node);
+	struct udev_device *parent = node;
+
+	while (p == NULL && count > 0) {
+		parent = udev_device_get_parent(parent);
+		p = udev_device_get_driver(parent);
+		--count;
+	}
+
+	return p;
+}
+
+// search parents of device until father for LBS
+static int find_lbs(struct udev_device *node)
+{
+	unsigned int count = 2;
+	char *p = NULL;
+	char path[128];
+
+	do {
+		strncpy(path, udev_device_get_syspath(node), 128);
+		strcat(path, "/queue/logical_block_size");
+
+		p = read_str(path);
+		if (p)
+			return atoi(p);	
+		else {
+			--count;
+			node = udev_device_get_parent(node);
+		}
+	} while (count > 0);
+
+	return -1;
+}
+
+void lsnvme_printss_header(const char *tab)
+{
+	printf("%s[dev:ns]\tdevtype\tvendor\tmodel\trevision\tdev\tsize\n", tab);
+}
+
+static int find_sz(unsigned long long total)
 {
 	int s = SZ_AUTO-1;
 
@@ -110,7 +138,6 @@ int find_sz(unsigned long long total)
 
 	return s;
 }
-
 
 /*
  * Get size or return "-"
@@ -122,7 +149,7 @@ static char *bd_size(struct udev_device *dev)
 	char path[128];
 	char *nptr, *endptr;
 	unsigned long long int blocks;
-	unsigned int block_size;
+	int block_size;
 	double total;
 	int ret;
 
@@ -141,10 +168,9 @@ static char *bd_size(struct udev_device *dev)
 	    (blocks == ULLONG_MAX && errno == ERANGE))
 		return "-";
 
-	strncpy(path, udev_device_get_syspath(dev), 128);
-	strcat(path, "/queue/logical_block_size");
-
-	block_size = atoi(read_str(path));
+	block_size = find_lbs(dev);	
+	if (block_size == -1)
+		return "-";
 
 	if (opts.sz == SZ_AUTO)
 		opts.sz = find_sz(blocks * block_size);
@@ -181,6 +207,24 @@ void lsnvme_printbd(struct udev_device *dev, const char *tab)
 }
 
 /*
+ * [dev:ns:pn]  devtype  device_file  size
+ */
+void lsnvme_printpart(struct udev_device *dev, const char *tab)
+{
+	struct udev_device *parent = udev_device_get_parent(dev);
+
+	printf("%s[%s:%s:%s]\t%s\t%s\t%s\n",
+		tab,
+		udev_device_get_sysnum(udev_device_get_parent(parent)),
+		udev_device_get_sysnum(udev_device_get_parent(dev)),
+		udev_device_get_sysnum(dev),
+		udev_device_get_devtype(dev),
+		udev_device_get_devnode(dev),
+		bd_size(dev)
+	);
+}
+
+/*
  * [dev]  vendor  model  bus  device_file?  driver
  */
 void lsnvme_printctrl(struct udev_device *dev)
@@ -197,10 +241,13 @@ void lsnvme_printctrl(struct udev_device *dev)
 	);
 }
 
+/*
+ * Given a /sys/class/.. path, try figuring out what kind
+ * of NVME dev it is and print the appropriate info.
+ */
 static int lsnvme_dev(const char *path)
 {
 	struct udev_device *dev = udev_device_new_from_syspath(udev, path);
-	//const char *dt = udev_device_get_devtype(dev);
 
 	if (dev == NULL)
 		return EXIT_FAILURE;
@@ -213,14 +260,20 @@ static int lsnvme_dev(const char *path)
 	return EXIT_SUCCESS;
 }
 
-static int lsnvme_enum_devs(struct udev_device *dev)
+static int lsnvme_ls(const char *path)
+{
+	// TODO: figure out how to map from /dev -> /sys/class
+	return lsnvme_dev(path);
+}
+
+static int lsnvme_enum_devs(struct udev_device *parent)
 {
 	struct udev_enumerate *enum_children = udev_enumerate_new(udev);
 	struct udev_list_entry *devices, *dev_list_entry;
 	struct udev_device *cdev;
 	const char *path;
 
-	udev_enumerate_add_match_parent(enum_children, dev);
+	udev_enumerate_add_match_parent(enum_children, parent);
 
 	udev_enumerate_scan_devices(enum_children);
 	devices = udev_enumerate_get_list_entry(enum_children);
@@ -230,13 +283,14 @@ static int lsnvme_enum_devs(struct udev_device *dev)
 		cdev = udev_device_new_from_syspath(udev, path);
 		const char *dt = udev_device_get_devtype(cdev);
 
-		if (opts.disp_ctrl && strcmp(udev_device_get_subsystem(cdev), NVME) == 0) {
-			lsnvme_printctrl(dev);
-		} else if (opts.disp_devs && dt && strcmp(dt, "partition")) {
+		/* skip parent */
+		if (udev_device_get_devnum(cdev) == udev_device_get_devnum(parent))
+			continue;
+
+		if (dt && strcmp(dt, "partition")) {
 			lsnvme_printbd(cdev, opts.disp_ctrl ? TAB : "");
 		} else {
-			/* skip devtype == NULL for now */
-			/* skip partitions for now */
+			lsnvme_printpart(cdev, opts.disp_ctrl ? TAB : "");
 		}
 
 		udev_device_unref(cdev);
@@ -247,7 +301,7 @@ static int lsnvme_enum_devs(struct udev_device *dev)
 	return EXIT_SUCCESS;
 }
 
-static int lsnvme_enum_ctrl(const char *match)
+static int lsnvme_enum_ctrl(void)
 {
 	struct udev_enumerate *enum_parents;
 	struct udev_list_entry *devices, *dev_list_entry;
@@ -264,7 +318,11 @@ static int lsnvme_enum_ctrl(const char *match)
 		path = udev_list_entry_get_name(dev_list_entry);
 		dev = udev_device_new_from_syspath(udev, path);
 
-		lsnvme_enum_devs(dev);
+		if (opts.disp_ctrl)
+			lsnvme_printctrl(dev);
+
+		if (opts.disp_devs)
+			lsnvme_enum_devs(dev);
 
 		udev_device_unref(dev);
 	}
@@ -274,9 +332,30 @@ static int lsnvme_enum_ctrl(const char *match)
 	return EXIT_SUCCESS;
 }
 
+static void lsnvme_get_mount_paths(void)
+{
+	FILE *fp;
+	struct mntent *fs;
+	const char *mounts = "/proc/mounts";
+
+	fp = setmntent(mounts, "r");
+	if (fp == NULL) {
+		fprintf(stderr, "Could not open: %s\n", mounts);
+		return;
+	}
+
+	while ((fs = getmntent(fp)) != NULL)
+		if (strcmp(fs->mnt_type, "sysfs") == 0)
+			SYS = strdup(fs->mnt_fsname);
+		else if (strcmp(fs->mnt_type, "devtmpfs") == 0)
+			DEV = strdup(fs->mnt_fsname);
+
+	endmntent(fp);
+}
+
 static int version(const char *progr)
 {
-	fprintf(stdout, "%s: 0.1\n", progr);
+	fprintf(stdout, "%s: 0.2\n", progr);
 	return EXIT_SUCCESS;
 }
 
@@ -308,6 +387,7 @@ static void set_size(char size_spec)
 static struct option long_options[] = {
 	{"size",	required_argument, 0, 's'},
 	{"host",	optional_argument, 0, 'H'},
+	{"host",	optional_argument, 0, 'C'},
 	{"tree",	no_argument, 0, 't'},
 	{"m",		no_argument, 0, 'm'},
 	{"headers",	no_argument, &opts.headers, 1},
@@ -353,7 +433,7 @@ int main(int argc, char *argv[])
 {
 	int opt, option_index, ret = EXIT_SUCCESS;
 
-	while ((opt = getopt_long(argc, argv, "s:HtmVvh", long_options, &option_index)) != -1) {
+	while ((opt = getopt_long(argc, argv, "s:HCtmVvh", long_options, &option_index)) != -1) {
 		switch (opt) {
 		case 0: /* longopt only, may not be used */
 			printf("option: %s\n", long_options[option_index].name);
@@ -363,6 +443,10 @@ int main(int argc, char *argv[])
 			set_size(optarg[0]);
 			break;
 		case 'H':
+			opts.disp_ctrl = true;
+			opts.disp_devs = false;
+			break;
+		case 'C':
 			opts.disp_ctrl = true;
 			opts.disp_devs = false;
 			break;
@@ -389,13 +473,15 @@ int main(int argc, char *argv[])
 	if (udev == NULL) {
 		fprintf(stderr, "failed to initialize udev library, exiting\n");
 		return EXIT_FAILURE;
+	} else {
+		lsnvme_get_mount_paths();
 	}
 
 	if (optind < argc)
 		while (optind < argc)
-			ret += lsnvme_dev(argv[optind++]);
+			ret += lsnvme_ls(argv[optind++]);
 	else
-		ret = lsnvme_enum_ctrl(NULL);
+		ret = lsnvme_enum_ctrl();
 
 	udev_unref(udev);
 	return ret;
