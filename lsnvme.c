@@ -102,6 +102,36 @@ static const char *find_driver(struct udev_device *node)
 	return p;
 }
 
+// given absolute path, return udev_device or null
+// mostly borrows from udevadm implementation
+static struct udev_device *find_device(const char *path)
+{
+	if (!path)
+		return NULL;
+
+	if (strncmp(path, DEV, strlen(DEV)) == 0) {
+		struct stat statbuf;
+		char type;
+
+		if (stat(path, &statbuf) < 0)
+			return NULL;
+
+		if (S_ISBLK(statbuf.st_mode))
+			type = 'b';
+		else if (S_ISCHR(statbuf.st_mode))
+			type = 'c';
+		else
+			return NULL;
+
+		return udev_device_new_from_devnum(udev, type, statbuf.st_rdev);
+
+	} else if (strncmp(path, DEV, strlen(SYS)) == 0) {
+		return udev_device_new_from_syspath(udev, path);
+	} else {
+		return NULL;
+	}
+}
+
 // search parents of device until father for LBS
 static int find_lbs(struct udev_device *node)
 {
@@ -189,66 +219,59 @@ static char *bd_size(struct udev_device *dev)
 }
 
 /*
- * [dev:ns]  devtype  vendor  model  revision  device_file  size
+ * [dev:ns] device_file devtype size <vendor model revision>
  */
 void lsnvme_printbd(struct udev_device *dev, const char *tab)
 {
-	printf("%s[%s:%s]\t%s\t%s\t%s\t%s\t%s\t%s\n",
-		tab,
+	printf("[%s:%s]%10s\t%s\t%s\t%s\t%s\t%s\n",
 		udev_device_get_sysnum(udev_device_get_parent(dev)),
 		udev_device_get_sysnum(dev),
+		udev_device_get_devnode(dev),
 		udev_device_get_devtype(dev),
+		bd_size(dev),
 		udev_device_get_property_value(dev, "ID_VENDOR"),
 		udev_device_get_property_value(dev, "ID_MODEL"),
-		udev_device_get_property_value(dev, "ID_REVISION"),
-		udev_device_get_devnode(dev),
-		bd_size(dev)
+		udev_device_get_property_value(dev, "ID_REVISION")
 	);
 }
 
 /*
- * [dev:ns:pn]  devtype  device_file  size
+ * [dev:ns:pn] device_file devtype size (part type?)
  */
 void lsnvme_printpart(struct udev_device *dev, const char *tab)
 {
 	struct udev_device *parent = udev_device_get_parent(dev);
 
-	printf("%s[%s:%s:%s]\t%s\t%s\t%s\n",
-		tab,
+	printf("[%s:%s:%s]%10s\t%s\t%s\n",
 		udev_device_get_sysnum(udev_device_get_parent(parent)),
 		udev_device_get_sysnum(udev_device_get_parent(dev)),
 		udev_device_get_sysnum(dev),
-		udev_device_get_devtype(dev),
 		udev_device_get_devnode(dev),
+		udev_device_get_devtype(dev),
 		bd_size(dev)
 	);
 }
 
 /*
- * [dev]  vendor  model  bus  device_file?  driver
+ * [dev] device_file vendor  model  bus  driver (transport?)
  */
 void lsnvme_printctrl(struct udev_device *dev)
 {
 	struct udev_device *pdev = udev_device_get_parent(dev);
 
-	printf("[%s]\t%s\t%s\t%s\t%s\t%s\n",
+	printf("[%s]%-8s\t%s\t%s\t%s\t%s\n",
 		udev_device_get_sysnum(dev),
+		udev_device_get_devnode(dev),
 		udev_device_get_property_value(pdev, "ID_VENDOR_FROM_DATABASE"),
 		udev_device_get_property_value(pdev, "ID_MODEL_FROM_DATABASE"),
 		udev_device_get_subsystem(pdev),
-		udev_device_get_devnode(dev),
 		find_driver(dev)
 	);
 }
 
-/*
- * Given a /sys/class/.. path, try figuring out what kind
- * of NVME dev it is and print the appropriate info.
- */
-static int lsnvme_dev(const char *path)
+static int lsnvme_ls(const char *path)
 {
-	struct udev_device *dev = udev_device_new_from_syspath(udev, path);
-
+	struct udev_device *dev = find_device(path);
 	if (dev == NULL)
 		return EXIT_FAILURE;
 
@@ -258,12 +281,6 @@ static int lsnvme_dev(const char *path)
 		lsnvme_printbd(dev, "");
 
 	return EXIT_SUCCESS;
-}
-
-static int lsnvme_ls(const char *path)
-{
-	// TODO: figure out how to map from /dev -> /sys/class
-	return lsnvme_dev(path);
 }
 
 static int lsnvme_enum_devs(struct udev_device *parent)
@@ -290,7 +307,7 @@ static int lsnvme_enum_devs(struct udev_device *parent)
 		if (dt && strcmp(dt, "partition")) {
 			lsnvme_printbd(cdev, opts.disp_ctrl ? TAB : "");
 		} else {
-			lsnvme_printpart(cdev, opts.disp_ctrl ? TAB : "");
+			lsnvme_printpart(cdev, "");
 		}
 
 		udev_device_unref(cdev);
@@ -332,6 +349,7 @@ static int lsnvme_enum_ctrl(void)
 	return EXIT_SUCCESS;
 }
 
+// TODO: don't allocate mem if mount points are equal?
 static void lsnvme_get_mount_paths(void)
 {
 	FILE *fp;
@@ -346,9 +364,9 @@ static void lsnvme_get_mount_paths(void)
 
 	while ((fs = getmntent(fp)) != NULL)
 		if (strcmp(fs->mnt_type, "sysfs") == 0)
-			SYS = strdup(fs->mnt_fsname);
+			SYS = strdup(fs->mnt_dir);
 		else if (strcmp(fs->mnt_type, "devtmpfs") == 0)
-			DEV = strdup(fs->mnt_fsname);
+			DEV = strdup(fs->mnt_dir);
 
 	endmntent(fp);
 }
