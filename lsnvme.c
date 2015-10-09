@@ -4,12 +4,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <stdint.h>
+#include <inttypes.h>
 #include <ctype.h>
 #include <getopt.h>
 #include <string.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 #include <limits.h>
 #include <errno.h>
@@ -17,6 +20,8 @@
 #include <mntent.h>
 
 #include <libudev.h>
+
+#include <linux/nvme.h>
 
 #define TAB "  "
 #define TEE "├─"
@@ -104,7 +109,7 @@ static const char *find_driver(struct udev_device *node)
 
 // given absolute path, return udev_device or null
 // mostly borrows from udevadm implementation
-static struct udev_device *find_device(const char *path)
+static struct udev_device *find_device(char *path)
 {
 	if (!path)
 		return NULL;
@@ -125,7 +130,13 @@ static struct udev_device *find_device(const char *path)
 
 		return udev_device_new_from_devnum(udev, type, statbuf.st_rdev);
 
-	} else if (strncmp(path, DEV, strlen(SYS)) == 0) {
+	} else if (strncmp(path, SYS, strlen(SYS)) == 0) {
+		size_t sz = strlen(path);
+
+		while (sz > 0 && path[sz-1] == '/') {
+			path[sz-1] = 0;
+			--sz;
+		}
 		return udev_device_new_from_syspath(udev, path);
 	} else {
 		return NULL;
@@ -218,12 +229,80 @@ static char *bd_size(struct udev_device *dev)
 	return size_str;
 }
 
+static int lsnvme_identify_ns(struct udev_device *dev, struct nvme_id_ns *ptr)
+{
+	const char *devpath = udev_device_get_devnode(dev);
+	uint32_t ns = atoi(udev_device_get_sysnum(dev));
+
+	int fd = open(devpath, O_RDONLY|O_NONBLOCK);
+	if (fd < 0) {
+		perror(devpath);
+		return errno;
+	}
+
+	struct nvme_admin_cmd cmd = {
+		.opcode = nvme_admin_identify,
+		.nsid = ns,
+		.addr = (uint64_t) ptr,
+		.data_len = 4096,
+		.cdw10 = 0,
+	};
+
+	return ioctl(fd, NVME_IOCTL_ADMIN_CMD, &cmd);
+}
+
+static int lsnvme_identify_ctrl(struct udev_device *dev, struct nvme_id_ctrl *ptr)
+{
+	const char *devpath = udev_device_get_devnode(dev);
+
+	int fd = open(devpath, O_RDONLY|O_NONBLOCK);
+	if (fd < 0) {
+		perror(devpath);
+		return errno;
+	}
+
+	struct nvme_admin_cmd cmd = {
+		.opcode = nvme_admin_identify,
+		.addr = (uint64_t) ptr,
+		.data_len = 4096,
+		.cdw10 = 1,
+	};
+	
+	return ioctl(fd, NVME_IOCTL_ADMIN_CMD, &cmd);
+}
+
+void lsnvme_printctrl_id(struct nvme_id_ctrl *id)
+{
+	id->sn[sizeof(id->sn)-1] = 0;
+	id->mn[sizeof(id->mn)-1] = 0;
+	id->fr[sizeof(id->fr)-1] = 0;
+
+	printf("%sPCI Vendor ID: %x\n", TAB, id->vid);
+	printf("%sPCI Subsystem Vendor ID: %x\n", TAB, id->ssvid);
+	printf("%sSerial Number: %s\n", TAB, id->sn);
+	printf("%sModel Number: %s\n", TAB, id->mn);
+	printf("%sFirmware Revision: %s\n", TAB, id->fr);
+
+	printf("%sIEEE OUI Identifier: %02x%02x%02x\n", TAB, id->ieee[2], id->ieee[1], id->ieee[0]);
+
+	printf("%sController ID: %x\n", TAB, id->cntlid);
+	printf("%sVersion: %x\n", TAB, id->ver);
+	printf("%sNumber of Namespaces: %d\n", TAB, id->nn);
+}
+
+void lsnvme_printctrl_ns(struct nvme_id_ns *ns)
+{
+	printf("%sNamespace Size: %#"PRIx64"\n", TAB, (uint64_t)le64toh(ns->nsze));
+	printf("%sNamespace Capacity: %#"PRIx64"\n", TAB, (uint64_t)le64toh(ns->ncap));
+	printf("%sNamespace Utilization: %#"PRIx64"\n", TAB, (uint64_t)le64toh(ns->nuse));
+}
+	
 /*
  * [dev:ns] device_file devtype size <vendor model revision>
  */
 void lsnvme_printbd(struct udev_device *dev, const char *tab)
 {
-	printf("[%s:%s]%10s\t%s\t%s\t%s\t%s\t%s\n",
+	printf("[%s:%s]\t%s\t%s\t%s\t%s\t%s\t%s\n",
 		udev_device_get_sysnum(udev_device_get_parent(dev)),
 		udev_device_get_sysnum(dev),
 		udev_device_get_devnode(dev),
@@ -233,6 +312,14 @@ void lsnvme_printbd(struct udev_device *dev, const char *tab)
 		udev_device_get_property_value(dev, "ID_MODEL"),
 		udev_device_get_property_value(dev, "ID_REVISION")
 	);
+
+	if (opts.verbose) {
+		struct nvme_id_ns ns;
+		if(lsnvme_identify_ns(dev, &ns))
+			fprintf(stderr, "%sioctl failed on: %s\n", TAB, udev_device_get_devnode(dev));
+		else
+			lsnvme_printctrl_ns(&ns);
+	}
 }
 
 /*
@@ -242,7 +329,7 @@ void lsnvme_printpart(struct udev_device *dev, const char *tab)
 {
 	struct udev_device *parent = udev_device_get_parent(dev);
 
-	printf("[%s:%s:%s]%10s\t%s\t%s\n",
+	printf("[%s:%s:%s]\t%s\t%s\t%s\n",
 		udev_device_get_sysnum(udev_device_get_parent(parent)),
 		udev_device_get_sysnum(udev_device_get_parent(dev)),
 		udev_device_get_sysnum(dev),
@@ -259,7 +346,7 @@ void lsnvme_printctrl(struct udev_device *dev)
 {
 	struct udev_device *pdev = udev_device_get_parent(dev);
 
-	printf("[%s]%-8s\t%s\t%s\t%s\t%s\n",
+	printf("[%s]\t%s\t%s\t%s\t%s\t%s\n",
 		udev_device_get_sysnum(dev),
 		udev_device_get_devnode(dev),
 		udev_device_get_property_value(pdev, "ID_VENDOR_FROM_DATABASE"),
@@ -267,21 +354,35 @@ void lsnvme_printctrl(struct udev_device *dev)
 		udev_device_get_subsystem(pdev),
 		find_driver(dev)
 	);
+
+	if (opts.verbose) {
+		struct nvme_id_ctrl id;
+		if(lsnvme_identify_ctrl(dev, &id))
+			fprintf(stderr, "%sioctl failed on: %s\n", TAB, udev_device_get_devnode(dev));
+		else
+			lsnvme_printctrl_id(&id);
+	}
 }
 
-static int lsnvme_ls(const char *path)
+static int lsnvme_ls(char *path)
 {
 	struct udev_device *dev = find_device(path);
+	const char *dt;
 	if (dev == NULL)
 		return EXIT_FAILURE;
 
+	dt = udev_device_get_devtype(dev);
+
 	if (strcmp(udev_device_get_subsystem(dev), NVME) == 0)
 		lsnvme_printctrl(dev);
-	else
+	else if (dt && strcmp(dt, "partition"))
 		lsnvme_printbd(dev, "");
+	else
+		lsnvme_printpart(dev, "");
 
 	return EXIT_SUCCESS;
 }
+
 
 static int lsnvme_enum_devs(struct udev_device *parent)
 {
@@ -495,10 +596,11 @@ int main(int argc, char *argv[])
 		lsnvme_get_mount_paths();
 	}
 
-	if (optind < argc)
-		while (optind < argc)
-			ret += lsnvme_ls(argv[optind++]);
-	else
+	if (optind < argc) {
+		while (optind < argc) 
+			if(lsnvme_ls(argv[optind++]))
+				fprintf(stderr, "%s: unable to get info for: %s\n", argv[0], argv[optind-1]);
+	} else
 		ret = lsnvme_enum_ctrl();
 
 	udev_unref(udev);
