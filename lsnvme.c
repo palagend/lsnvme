@@ -168,7 +168,8 @@ static int find_lbs(struct udev_device *node)
 
 void lsnvme_printss_header(const char *tab)
 {
-	printf("%s[dev:ns]\tdevtype\tvendor\tmodel\trevision\tdev\tsize\n", tab);
+	printf("%s[dev:ns]\tdevtype\tvendor\tmodel\trevision\tdev\tsize\n",
+		tab);
 }
 
 static int find_sz(unsigned long long total)
@@ -220,7 +221,8 @@ static char *bd_size(struct udev_device *dev)
 		ret = snprintf(size_str, 32, "%llu", blocks * block_size);
 	} else {
 		total = (double)(blocks * block_size) / disk_sizes[opts.sz].div;
-		ret = snprintf(size_str, 32, "%.2f%c", total, disk_sizes[opts.sz].suffix);
+		ret = snprintf(size_str, 32, "%.2f%c",
+				total, disk_sizes[opts.sz].suffix);
 	}
 
 	if (ret >= 32)
@@ -251,7 +253,8 @@ static int lsnvme_identify_ns(struct udev_device *dev, struct nvme_id_ns *ptr)
 	return ioctl(fd, NVME_IOCTL_ADMIN_CMD, &cmd);
 }
 
-static int lsnvme_identify_ctrl(struct udev_device *dev, struct nvme_id_ctrl *ptr)
+static int lsnvme_identify_ctrl(struct udev_device *dev,
+				struct nvme_id_ctrl *ptr)
 {
 	const char *devpath = udev_device_get_devnode(dev);
 
@@ -283,7 +286,8 @@ void lsnvme_printctrl_id(struct nvme_id_ctrl *id)
 	printf("%sModel Number: %s\n", TAB, id->mn);
 	printf("%sFirmware Revision: %s\n", TAB, id->fr);
 
-	printf("%sIEEE OUI Identifier: %02x%02x%02x\n", TAB, id->ieee[2], id->ieee[1], id->ieee[0]);
+	printf("%sIEEE OUI Identifier: %02x%02x%02x\n",
+		TAB, id->ieee[2], id->ieee[1], id->ieee[0]);
 
 	printf("%sController ID: %x\n", TAB, id->cntlid);
 	printf("%sVersion: %x\n", TAB, id->ver);
@@ -292,9 +296,12 @@ void lsnvme_printctrl_id(struct nvme_id_ctrl *id)
 
 void lsnvme_printctrl_ns(struct nvme_id_ns *ns)
 {
-	printf("%sNamespace Size: %#"PRIx64"\n", TAB, (uint64_t)le64toh(ns->nsze));
-	printf("%sNamespace Capacity: %#"PRIx64"\n", TAB, (uint64_t)le64toh(ns->ncap));
-	printf("%sNamespace Utilization: %#"PRIx64"\n", TAB, (uint64_t)le64toh(ns->nuse));
+	printf("%sNamespace Size: %#"PRIx64"\n",
+		TAB, (uint64_t)le64toh(ns->nsze));
+	printf("%sNamespace Capacity: %#"PRIx64"\n",
+		TAB, (uint64_t)le64toh(ns->ncap));
+	printf("%sNamespace Utilization: %#"PRIx64"\n",
+		TAB, (uint64_t)le64toh(ns->nuse));
 }
 	
 /*
@@ -316,7 +323,8 @@ void lsnvme_printbd(struct udev_device *dev, const char *tab)
 	if (opts.verbose) {
 		struct nvme_id_ns ns;
 		if(lsnvme_identify_ns(dev, &ns))
-			fprintf(stderr, "%sioctl failed on: %s\n", TAB, udev_device_get_devnode(dev));
+			fprintf(stderr, "%sioctl failed on: %s\n",
+				TAB, udev_device_get_devnode(dev));
 		else
 			lsnvme_printctrl_ns(&ns);
 	}
@@ -358,7 +366,8 @@ void lsnvme_printctrl(struct udev_device *dev)
 	if (opts.verbose) {
 		struct nvme_id_ctrl id;
 		if(lsnvme_identify_ctrl(dev, &id))
-			fprintf(stderr, "%sioctl failed on: %s\n", TAB, udev_device_get_devnode(dev));
+			fprintf(stderr, "%sioctl failed on: %s\n",
+				TAB, udev_device_get_devnode(dev));
 		else
 			lsnvme_printctrl_id(&id);
 	}
@@ -402,7 +411,8 @@ static int lsnvme_enum_devs(struct udev_device *parent)
 		const char *dt = udev_device_get_devtype(cdev);
 
 		/* skip parent */
-		if (udev_device_get_devnum(cdev) == udev_device_get_devnum(parent))
+		if (udev_device_get_devnum(cdev) ==
+		    udev_device_get_devnum(parent))
 			continue;
 
 		if (dt && strcmp(dt, "partition")) {
@@ -506,8 +516,9 @@ static void set_size(char size_spec)
 static struct option long_options[] = {
 	{"size",	required_argument, 0, 's'},
 	{"host",	optional_argument, 0, 'H'},
-	{"host",	optional_argument, 0, 'C'},
 	{"tree",	no_argument, 0, 't'},
+	{"targets",	no_argument, 0, 'T'},
+	{"discover",	no_argument, 0, 'D'},
 	{"m",		no_argument, 0, 'm'},
 	{"headers",	no_argument, &opts.headers, 1},
 	{"version",	no_argument, 0, 'V'},
@@ -518,8 +529,10 @@ static struct option long_options[] = {
 
 static const char *help_strings[][2] = {
 	{"SIZE",	"\tspecific size from [GMKB], default: auto"},
-	{"",		"\tdisplay host context"},
+	{"",		"\tdisplay host(s) attached to this target system"},
 	{"",		"\tdisplay tree-like diagram if possible"},
+	{"",		"\tlist targets attached to this host (WIP)"},
+	{"",		"Go 'discover' resources available for a host (WIP)"},
 	{"",		"\tmachine readable output"},
 	{"",		"\tprint descriptive headers"},
 	{"",		"\tdisplay version and exit"},
@@ -532,7 +545,7 @@ static int usage(const char *progr)
 {
 	const struct option *ptr = long_options;
 
-	printf("Usage: %s [<switches>] [ devices.. ]\n\n", progr);
+	printf("\nUsage: %s [<switches>] [ devices.. ]\n", progr);
 
 	for (int i = 0; ptr->name != NULL; ++i, ptr = &long_options[i])
 		if (ptr->has_arg == required_argument)
@@ -545,6 +558,7 @@ static int usage(const char *progr)
 			printf("  -%c, --%s\t%s\n", ptr->val, ptr->name,
 				help_strings[i][1]);
 
+	printf("\n");
 	return EXIT_SUCCESS;
 }
 
@@ -552,7 +566,8 @@ int main(int argc, char *argv[])
 {
 	int opt, option_index, ret = EXIT_SUCCESS;
 
-	while ((opt = getopt_long(argc, argv, "s:HCtmVvh", long_options, &option_index)) != -1) {
+	while ((opt = getopt_long(argc, argv, "s:DHTCtmVvh",
+				  long_options, &option_index)) != -1) {
 		switch (opt) {
 		case 0: /* longopt only, may not be used */
 			printf("option: %s\n", long_options[option_index].name);
@@ -565,6 +580,9 @@ int main(int argc, char *argv[])
 			opts.disp_ctrl = true;
 			opts.disp_devs = false;
 			break;
+		/* TODO: Not sure what -C is doing if it's
+		 * the same as -H?
+		 */
 		case 'C':
 			opts.disp_ctrl = true;
 			opts.disp_devs = false;
@@ -580,6 +598,17 @@ int main(int argc, char *argv[])
 		case 'v':
 			++opts.verbose;
 			break;
+		case 'D':
+			printf("lsnvme WIP...\"Go discover NVMe resources ");
+			printf("on this target system that\n");
+			printf("are available for a host/initiator.\"\n");
+			return ret;
+		case 'T':
+			printf("lsnvme WIP...\"Go list the NVMe subsystem ");
+			printf("targets and the allocated cntlid's\n");
+			printf("in each attached subsystem to ");
+			printf("this host/initiator.\"\n");
+			return ret;
 		case 'h':
 		case '?':
 		default:
@@ -599,7 +628,9 @@ int main(int argc, char *argv[])
 	if (optind < argc) {
 		while (optind < argc) 
 			if(lsnvme_ls(argv[optind++]))
-				fprintf(stderr, "%s: unable to get info for: %s\n", argv[0], argv[optind-1]);
+				fprintf(stderr, 
+					"%s: unable to get info for: %s\n",
+					argv[0], argv[optind-1]);
 	} else
 		ret = lsnvme_enum_ctrl();
 
