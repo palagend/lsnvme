@@ -602,6 +602,9 @@ int main(int argc, char *argv[])
 			printf("lsnvme WIP...\"Go discover NVMe resources ");
 			printf("on this target system that\n");
 			printf("are available for a host/initiator.\"\n");
+			printf("OR\n");
+			printf("\"Go discover NVMe resources \'out there\' ");
+			printf("on the network for\nthe host/initiator.\"\n");
 			return ret;
 		case 'T':
 			printf("lsnvme WIP...\"Go list the NVMe subsystem ");
