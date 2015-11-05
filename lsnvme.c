@@ -18,7 +18,9 @@
 
 #include <libudev.h>
 
+// these are moving around
 #include <linux/nvme.h>
+#include <uapi/linux/nvme_ioctl.h>
 
 #define TAB "  "
 #define TEE "├─"
@@ -293,12 +295,14 @@ void lsnvme_printctrl_id(struct nvme_id_ctrl *id)
 
 void lsnvme_printctrl_ns(struct nvme_id_ns *ns)
 {
-	printf("%sNamespace Size: %#"PRIx64"\n",
+	printf("%sNamespace Size: %"PRIu64"\n",
 		TAB, (uint64_t)le64toh(ns->nsze));
-	printf("%sNamespace Capacity: %#"PRIx64"\n",
+	printf("%sNamespace Capacity: %"PRIu64"\n",
 		TAB, (uint64_t)le64toh(ns->ncap));
-	printf("%sNamespace Utilization: %#"PRIx64"\n",
+	printf("%sNamespace Utilization: %"PRIu64"\n",
 		TAB, (uint64_t)le64toh(ns->nuse));
+	printf("%sNVM Capacity: %"PRIu64"\n",
+		TAB, (uint64_t)le64toh(ns->nvmcap));
 }
 	
 /*

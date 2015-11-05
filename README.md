@@ -49,24 +49,41 @@ This initial release is not intended for production. Some TODOs:
 +----------------+                      |  | disk1, disk2, ... |       |
                                         |                              |
                                         +------------------------------+
+```
 
-The output will look like the following for the above scenario:
+The output will look like the following:
 
+```
 # FROM HOST SYSTEM
 $ lsnvme -H
-disk1 -> transport mapping
-disk2 -> transport mapping
+[0]     /dev/nvme0      Intel Corporation       (null)  pci     nvme    (null)
+
+$ lsnvme -v
+[0:1]   /dev/nvme0n1    disk    12502.51G       (null)  (null)  (null)
+  Namespace Size: 390703446
+  Namespace Capacity: 390703446
+  Namespace Utilization: 390703446
+  NVM Capacity: 140733787268064
+
+# or specify dev and sysfs entries directly:
+$ lsnvme -v /dev/nvme0 /sys/class/nvme/nvme0/nvme0n1/
+[0]     /dev/nvme0      Intel Corporation       (null)  pci     nvme    (null)
+  PCI Vendor ID: 8086
+  PCI Subsystem Vendor ID: 8086
+  Serial Number: CVMD433000CL1P6KGN
+  Model Number: INTEL SSDPEDME016T4
+  Firmware Revision: 8DV1013
+  IEEE OUI Identifier: 5cd2e4
+  Controller ID: 0
+  Version: 0
+  Number of Namespaces: 1
+[0:1]   /dev/nvme0n1    disk    12502.51G       (null)  (null)  (null)
+  Namespace Size: 390703446
+  Namespace Capacity: 390703446
+  Namespace Utilization: 390703446
+  NVM Capacity: 140731497137168
 
 $ lsnvme -T
-disk1   info  /dev/nvme0n1
-disk2   info  /dev/nvme0n2
-
-# FROM TARGET SYSTEM
-$ lsnvme -H
-(empty?)
-
-$ lsnvme -T
-disk1   info  /dev/nvme0n1
-disk2   info  /dev/nvme0n2
+TODO
 
 ```
