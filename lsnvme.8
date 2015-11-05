@@ -15,7 +15,8 @@ Use the options described below to request more verbose output, machine
 readable output, or to list the controllers.
 
 When given one or more devices lsnvme will try to detect the device type and
-display the appropriate information.
+display the appropriate information. The nvme devices may be a block or character
+device under /dev or a sysfs directory (ie /sys/class/nvme/nvme1).
 
 .SH OPTIONS
 
@@ -34,7 +35,8 @@ Display host context.
 .SS Display options
 .TP
 .B -v
-Be verbose and display detailed information about all devices.
+In addition to querying udev for basic device info, perform an NVME ID command and
+display basic information from it.
 .TP
 .B -vv
 Be very verbose and display more details. This level includes everything deemed

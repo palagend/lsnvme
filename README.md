@@ -4,13 +4,15 @@ properties of their attached drives both local and remote.
 Much of lsnvme is modeled after lsscsi written by Doug Gilbert.
 Some features and options from lsblk and lspci are included as well.
 
-**Installation**
+**Building and Installation**
 
 lsnvme requires libudev (-devel for building) for walking through sysfs.
-On RHEL distros this is a part of the systemd-devel package.
+On RHEL distros this is a part of the systemd-devel package. On earlier or
+non systemd distros these are probably in libudev(-devel).
 
 ```
 $ make
+$ make install
 ```
 
 **Usage**
@@ -29,18 +31,14 @@ $ lsnvme -H
 
 **Known issues**
 
-This initial release is not intended for production.
+This initial release is not intended for production. Some TODOs:
 
-* Display of controllers with no namespaces is a TODO (need hardware)
-* No RDMA backed devices supported (aftr milestone 3?)
-* strip slashes from given paths
-* take paths from /dev or /sys, fugure out which and do the right thing.
-* sort entries with natural sort
-* Test with non-default /sys and /dev classes
-* sort entries properly
-* this should work:  lsblk --output NAME,VENDOR,REV,MODEL,SERIAL,TYPE,WWN,SUBSYSTEMS
+* No devices over fabric supported yet (waiting for upstream support).
+* Sort entries with natural sort.
+* Test with non-default /sys and /dev.
+* Tree/machine output.
 
-**How it should work**
+**Example output**
 
 ```
 +-HOST-SYSTEM----+                      +--TARGET-SYSTEM---------------+
@@ -54,7 +52,7 @@ This initial release is not intended for production.
 
 The output will look like the following for the above scenario:
 
-# HOST SYSTEM
+# FROM HOST SYSTEM
 $ lsnvme -H
 disk1 -> transport mapping
 disk2 -> transport mapping
@@ -63,7 +61,7 @@ $ lsnvme -T
 disk1   info  /dev/nvme0n1
 disk2   info  /dev/nvme0n2
 
-# TARGET SYSTEM
+# FROM TARGET SYSTEM
 $ lsnvme -H
 (empty?)
 

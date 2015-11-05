@@ -1,6 +1,3 @@
-// only needed for ioctl interface:
-//#include <linux/nvme.h>
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -566,7 +563,7 @@ int main(int argc, char *argv[])
 {
 	int opt, option_index, ret = EXIT_SUCCESS;
 
-	while ((opt = getopt_long(argc, argv, "s:DHTCtmVvh",
+	while ((opt = getopt_long(argc, argv, "s:DHTtmVvh",
 				  long_options, &option_index)) != -1) {
 		switch (opt) {
 		case 0: /* longopt only, may not be used */
@@ -577,13 +574,6 @@ int main(int argc, char *argv[])
 			set_size(optarg[0]);
 			break;
 		case 'H':
-			opts.disp_ctrl = true;
-			opts.disp_devs = false;
-			break;
-		/* TODO: Not sure what -C is doing if it's
-		 * the same as -H?
-		 */
-		case 'C':
 			opts.disp_ctrl = true;
 			opts.disp_devs = false;
 			break;
@@ -628,14 +618,17 @@ int main(int argc, char *argv[])
 		lsnvme_get_mount_paths();
 	}
 
+	/* if given a list of devices, print them, otherwise
+ 	 * print all controllers */
 	if (optind < argc) {
 		while (optind < argc) 
 			if(lsnvme_ls(argv[optind++]))
 				fprintf(stderr, 
 					"%s: unable to get info for: %s\n",
 					argv[0], argv[optind-1]);
-	} else
+	} else {
 		ret = lsnvme_enum_ctrl();
+	}
 
 	udev_unref(udev);
 	return ret;
