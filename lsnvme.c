@@ -27,12 +27,13 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <mntent.h>
+#include <libgen.h>
 
 #include <libudev.h>
 
 // these are moving around
 #include <linux/nvme.h>
-#include <uapi/linux/nvme_ioctl.h>
+//#include <uapi/linux/nvme_ioctl.h>
 
 #define TAB "  "
 #define TEE "├─"
@@ -88,7 +89,7 @@ static struct size_spec {
 static char *read_str(const char *path)
 {
 	static char read_str[32] = {0};
-	int fd = open(path, O_RDONLY);
+	int fd = open(path, O_RDONLY|O_NONBLOCK);
 
 	if (fd < 0)
 		return NULL;
@@ -264,6 +265,35 @@ static int lsnvme_identify_ns(struct udev_device *dev, struct nvme_id_ns *ptr)
 	return ioctl(fd, NVME_IOCTL_ADMIN_CMD, &cmd);
 }
 
+static const char *lsnvme_query_hwdb(struct udev_device *dev,
+			       const char *key)
+{
+	static struct udev_hwdb *hwdb = NULL;
+	struct udev_list_entry *list, *current;
+	const char *value = NULL;
+	const char *modalias = NULL;
+
+	// check if value is cached in dev object
+	value = udev_device_get_property_value(dev, key);
+	if (value)
+		return value;
+
+	modalias = udev_device_get_property_value(dev, "MODALIAS");
+
+	if (!modalias)
+		return "-";
+
+	if (hwdb == NULL)
+		hwdb = udev_hwdb_new(udev);
+	
+	list = udev_hwdb_get_properties_list_entry(hwdb, modalias, 0);
+	current = udev_list_entry_get_by_name(list, key);
+
+	value = udev_list_entry_get_value(current);
+
+	return value ? value : "-";
+}
+
 static int lsnvme_identify_ctrl(struct udev_device *dev,
 				struct nvme_id_ctrl *ptr)
 {
@@ -370,8 +400,8 @@ void lsnvme_printctrl(struct udev_device *dev)
 	printf("[%s]\t%s\t%s\t%s\t%s\t%s\n",
 		udev_device_get_sysnum(dev),
 		udev_device_get_devnode(dev),
-		udev_device_get_property_value(pdev, "ID_VENDOR_FROM_DATABASE"),
-		udev_device_get_property_value(pdev, "ID_MODEL_FROM_DATABASE"),
+		lsnvme_query_hwdb(pdev, "ID_VENDOR_FROM_DATABASE"),
+		lsnvme_query_hwdb(pdev, "ID_MODEL_FROM_DATABASE"),
 		udev_device_get_subsystem(pdev),
 		find_driver(dev)
 	);
