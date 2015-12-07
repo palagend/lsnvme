@@ -50,6 +50,7 @@ enum {
 	SZ_KB,
 	SZ_MB,
 	SZ_GB,
+	SZ_TB,
 	SZ_AUTO,
 };
 
@@ -73,13 +74,14 @@ static struct options {
 };
 
 static struct size_spec {
-	unsigned int div;
+	unsigned long int div;
 	char suffix;
 } disk_sizes[] = {
 	[SZ_B] = { 1, 'B' },
 	[SZ_KB] = { 1024, 'K' },
 	[SZ_MB] = { 1024 * 1000, 'M' },
 	[SZ_GB] = { 1024 * 1000 * 1000, 'G' },
+	[SZ_TB] = { 0xee6b280000ULL, 'T' },
 	[SZ_AUTO] = { 0, 0 },
 };
 
@@ -155,29 +157,6 @@ static struct udev_device *find_device(char *path)
 	}
 }
 
-// search parents of device until father for LBS
-static int find_lbs(struct udev_device *node)
-{
-	unsigned int count = 2;
-	char *p = NULL;
-	char path[128];
-
-	do {
-		strncpy(path, udev_device_get_syspath(node), 128);
-		strcat(path, "/queue/logical_block_size");
-
-		p = read_str(path);
-		if (p)
-			return atoi(p);	
-		else {
-			--count;
-			node = udev_device_get_parent(node);
-		}
-	} while (count > 0);
-
-	return -1;
-}
-
 void lsnvme_printss_header(const char *tab)
 {
 	printf("%s[dev:ns]\tdevtype\tvendor\tmodel\trevision\tdev\tsize\n",
@@ -195,6 +174,7 @@ static int find_sz(unsigned long long total)
 
 /*
  * Get size or return "-"
+ * Max size supported right now is 36000 TB
  * TODO: support Terabyte size
  */
 static char *bd_size(struct udev_device *dev)
@@ -202,8 +182,7 @@ static char *bd_size(struct udev_device *dev)
 	static char size_str[32];
 	char path[128];
 	char *nptr, *endptr;
-	unsigned long long int blocks;
-	int block_size;
+	unsigned long long int sectors;
 	double total;
 	int ret;
 
@@ -215,24 +194,26 @@ static char *bd_size(struct udev_device *dev)
 	if (!nptr)
 		return "-";
 
-	blocks = strtoull(nptr, &endptr, 10);
+	sectors = strtoull(nptr, &endptr, 10);
 
 	// no valid digits || overflow
-	if ((blocks == 0 && nptr == endptr ) ||
-	    (blocks == ULLONG_MAX && errno == ERANGE))
+	if ((sectors == 0 && nptr == endptr ) ||
+	    (sectors == ULLONG_MAX && errno == ERANGE))
 		return "-";
 
-	block_size = find_lbs(dev);	
-	if (block_size == -1)
+	// too big: ~1 >> 55
+	if (sectors > 0x7fffffffffffffULL)
 		return "-";
+
+	sectors <<= 9;
 
 	if (opts.sz == SZ_AUTO)
-		opts.sz = find_sz(blocks * block_size);
+		opts.sz = find_sz(sectors);
 
 	if (opts.sz == SZ_B) {
-		ret = snprintf(size_str, 32, "%llu", blocks * block_size);
+		ret = snprintf(size_str, 32, "%llu", sectors);
 	} else {
-		total = (double)(blocks * block_size) / disk_sizes[opts.sz].div;
+		total = (double)(sectors) / disk_sizes[opts.sz].div;
 		ret = snprintf(size_str, 32, "%.2f%c",
 				total, disk_sizes[opts.sz].suffix);
 	}
@@ -358,9 +339,9 @@ void lsnvme_printbd(struct udev_device *dev, const char *tab)
 		udev_device_get_devnode(dev),
 		udev_device_get_devtype(dev),
 		bd_size(dev),
-		udev_device_get_property_value(dev, "ID_VENDOR"),
-		udev_device_get_property_value(dev, "ID_MODEL"),
-		udev_device_get_property_value(dev, "ID_REVISION")
+		lsnvme_query_hwdb(dev, "ID_VENDOR"),
+		lsnvme_query_hwdb(dev, "ID_MODEL"),
+		lsnvme_query_hwdb(dev, "ID_REVISION")
 	);
 
 	if (opts.verbose) {
@@ -550,6 +531,10 @@ static void set_size(char size_spec)
 	case 'g':
 		opts.sz = SZ_GB;
 		break;
+	case 'T':
+	case 't':
+		opts.sz = SZ_TB;
+		break;
 	default:
 		opts.sz = SZ_AUTO;
 		break;
@@ -571,7 +556,7 @@ static struct option long_options[] = {
 };
 
 static const char *help_strings[][2] = {
-	{"SIZE",	"\tspecific size from [GMKB], default: auto"},
+	{"SIZE",	"\tspecific size from [TGMKB], default: auto"},
 	{"",		"\tdisplay host(s) attached to this target system"},
 	{"",		"\tdisplay tree-like diagram if possible"},
 	{"",		"\tlist targets attached to this host (WIP)"},
