@@ -272,7 +272,7 @@ static const char *lsnvme_query_hwdb(struct udev_device *dev,
 
 	value = udev_list_entry_get_value(current);
 
-	return value ? value : "-";
+	return value ? strdup(value) : "-";
 }
 
 static int lsnvme_identify_ctrl(struct udev_device *dev,
