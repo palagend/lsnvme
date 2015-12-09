@@ -298,15 +298,11 @@ static int lsnvme_identify_ctrl(struct udev_device *dev,
 
 void lsnvme_printctrl_id(struct nvme_id_ctrl *id)
 {
-	id->sn[sizeof(id->sn)-1] = 0;
-	id->mn[sizeof(id->mn)-1] = 0;
-	id->fr[sizeof(id->fr)-1] = 0;
-
 	printf("%sPCI Vendor ID: %x\n", TAB, id->vid);
 	printf("%sPCI Subsystem Vendor ID: %x\n", TAB, id->ssvid);
-	printf("%sSerial Number: %s\n", TAB, id->sn);
-	printf("%sModel Number: %s\n", TAB, id->mn);
-	printf("%sFirmware Revision: %s\n", TAB, id->fr);
+	printf("%-20.20sSerial Number: %s\n", TAB, id->sn);
+	printf("%-20.20sModel Number: %s\n", TAB, id->mn);
+	printf("%-20.20sFirmware Revision: %s\n", TAB, id->fr);
 
 	printf("%sIEEE OUI Identifier: %02x%02x%02x\n",
 		TAB, id->ieee[2], id->ieee[1], id->ieee[0]);
