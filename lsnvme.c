@@ -300,9 +300,9 @@ void lsnvme_printctrl_id(struct nvme_id_ctrl *id)
 {
 	printf("%sPCI Vendor ID: %x\n", TAB, id->vid);
 	printf("%sPCI Subsystem Vendor ID: %x\n", TAB, id->ssvid);
-	printf("%-20.20sSerial Number: %s\n", TAB, id->sn);
-	printf("%-20.20sModel Number: %s\n", TAB, id->mn);
-	printf("%-20.20sFirmware Revision: %s\n", TAB, id->fr);
+	printf("%sSerial Number: %.20s\n", TAB, id->sn);
+	printf("%sModel Number: %.20s\n", TAB, id->mn);
+	printf("%sFirmware Revision: %.20s\n", TAB, id->fr);
 
 	printf("%sIEEE OUI Identifier: %02x%02x%02x\n",
 		TAB, id->ieee[2], id->ieee[1], id->ieee[0]);
